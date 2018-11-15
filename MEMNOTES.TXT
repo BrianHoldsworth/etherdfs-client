@@ -1,0 +1,156 @@
+
+                    === EtherDFS programming oddities ===
+                                Mateusz Viste
+
+EtherDFS is a TSR program... written in C. This alone might be considered an
+odd thing. While trying to limit as much as possible EtherDFS' memory
+footprint, I had to use a few *nasty* tricks that are listed below. I write
+this file mostly for myself so I can keep track of how that monster works.
+
+When going TSR, an application uses the INT 21h,31h DOS call. This call not
+only makes the application resident, but it also allows to trim any excess
+memory that won't be needed by the application any more. Problem is, that the
+memory can only be trimmed from the application's base address (PSP) upward.
+This is a problem because the order in which compilers lay out the memory is
+not compatible with such use. To take a specific example, here's how a typical
+OpenWatcom memory map looks like:
+
+  STACK       (application's stack)
+  _BSS        (global and static variables, unless pre-initialized)
+  ...         (some other stuff)
+  CONST       (literal constants, strings)
+  _DATA       (all variables and structures that are pre-initialized)
+  _TEXT       (application's code)
+  BEGTEXT     (mostly empty)
+  PSP
+
+Looking at the above layout it becomes clear that trimming the code in any
+place would lead to a program that would be dysfunctional at best. Why:
+ - all libc routines will end up dispersed inside _TEXT, hence calling them
+   will result in undefined behavior if _TEXT is not kept entirely,
+ - your TSR's routines might very well end up at the end of the _TEXT segment,
+   hence making it impossible to trim the program at all.
+ - trimming the code would make us loose all the DATA segment as well, on
+   which the TSR surely relies in one way or another.
+
+It is not a hopeless situation, though!
+
+*** Forbid libc calls in your resident code ***
+
+First problem can be easily eliminated by simply avoiding using any libc
+functions in your TSR code. Forget about conveniences like sprintf(),
+memcpy(), int86(), chain_intr(), etc etc. You will have to figure out how to
+replace every such call by your own code - at least in the resident part of
+your code. Be warned that your compiler might also emit "hidden" calls that
+you don't know about. This is commonly done by compilers to detect stack
+overflow situations - the stack overflow detection routine is usually part of
+the compiler's libc, and as such resides at a more or less random place in
+memory. Most compilers allow to disable stack overflow checks through a simple
+command-line switch ("-s" for OpenWatcom).
+
+*** Make sure the resident code comes first ***
+
+The second problem might or might not actually be a problem, depending on
+your compiler and optimization settings. If the compiler generates machine
+code in the same order than it appears in the source file, then all is well.
+You will simply have to put all resident routines at the top of your source
+code. OpenWatcom seems to do it that way - but I found a simple method to make
+sure that all my resident code ends up at the top of the program: I instruct
+OpenWatcom to put my resident routines in the _BEGTEXT segment, which is
+almost unused by default, and it works! To achieve that, OpenWatcom provides
+clever "pragma" instructions:
+  #pragma code_seg(BEGTEXT, CODE)
+  all code here will end up in BEGTEXT
+  #pragma code_seg(_TEXT, CODE)
+  all code here will be put in the default _TEXT segment
+
+*** Custom DATA & STACK segment ***
+
+Finally, the third problem is the most tricky to solve. One could think that
+it is enough to simply instruct the linker to reorder the layout as to put all
+DATA-related segments before code, but most compilers do not provide such
+control, and these that do, do not always end up with working code (OpenWatcom
+makes it possible to reorder segments at link time, but unfortunately it
+doesn't seem to adjust actual addresses of variables in the code, so it's not
+so useful).
+
+The solution I ended up with (not before experimenting with many other
+approaches, most of which ended up horribly) is to NOT use the DATA and STACK
+segment provided by the compiler. Instead, I allocate my own segment through
+an INT 21h,48h call, and I force EtherDFS to use THAT as its DATA & STACK
+segment. Easier said than done!
+
+*** Allocating memory: right amount, right place ***
+
+So I need to allocate memory to replace the DATA+STACK segment used by my
+program. Okay, but how much exactly? To figure this out, the compiler's
+memory map is of tremendous help. Simply add the size of all your DATA
+segments, add the amount of stack you'd like your TSR to have, and voila.
+
+Not only you need to allocate the right amount of memory, but you also need to
+allocate it at a "good" place. By default, your allocation might end up just
+above your program. What difference does it make, you ask? Well, once your
+program will be trimmed, it will leave some free space in memory. If this free
+space is not contiguous with the rest of your system's free memory, DOS will
+be unable to use it to load programs into it... That's called memory
+fragmentation. To avoid that, it is possible to force DOS to allocate new
+memory as high as possible by temporarily overriding its memory allocation
+strategy - see INT 21h/AH=58h.
+
+*** Self-modifying code ***
+
+Allocating memory is easy - but how to tell my TSR to use it? The problem here
+is that I allocate said memory in my transient code, but I need it to be used
+also by the TSR routines (meaning all my interrupt handlers). The solution
+I applied to this problem is to patch my TSR routines during runtime. Sounds
+crazy, but it works well once mastered. When the transient code allocates
+the memory for my new segment, it inserts machine code at the top of every
+interrupt handler used by the TSR. The machine code loads DS and SS with the
+new segment, as obtained from the memory allocation function.
+
+*** Where do I draw the line? ***
+
+Once all is ready, you can at last go TSR and drop the transient part of the
+application's memory, along with the old DATA & STACK segment. The "go TSR"
+call (also known by its little name "INT 21h/AH=31h") expects to obtain the
+amount of memory that needs to be kept, in 16-bytes units (paragraphs). But
+how do I know how many paragraphs my resident code really takes? Two solutions
+here: either check this out in your compiler's memory map, and report the size
+in your source code, or use a little trick to figure it out at compile time...
+The trick is as simple as inserting a code symbol (in my case I used an empty
+function) at the end of your resident code. The offset of this symbol will
+tell you exactly how big the resident code is.
+
+Important: once you know how big your resident code is, add 256 to that! This
+is the size of the PSP. Other compilers might or might not account for that,
+but OpenWatcom definitely does not (not in the small model with EXE output at
+least, I didn't check other combinations).
+
+*** Squeeze out some extra bytes by eliminating literal strings ***
+
+The transient part of your program may use pre-initialized arrays, or pointers
+to strings:
+  char hello[] = "Hello";
+  char *wowsig = "wow";
+
+In both cases, chances are that your compiler will push these strings into the
+DATA segment of the program, hence - again - unnecessarily bloating the memory
+area used by the TSR. For simple cases, it's trivial to change such
+declarations into something like this, to enforce stack usage:
+  char hello[6];
+  hello[0]='H'; hello[1]='e'; hello[2]='l'; hello[3]='l'; hello[4]='o';
+
+But what if the amount of text you wish to output is much larger? It might
+become a real pain to handle very long strings, not mentionning the fact that
+you might want to keep your stack usage at a reasonable level as well.
+
+I am aware of no easy solution for this. But since I was motivated, I ended up
+taking the hard road: embedding the strings as machine code. It sounds scary
+(and it should!), but with proper build automation it can be very manageable.
+I have a separate program called "genmsg" that generates assembly functions
+responsible for printing out each of my strings. Every such 'function' lands
+in a separate C file in the 'msg' subdirectory, so I include the needed file
+whenever I want to output a string on the screen.
+
+
+[EOF]

@@ -1,0 +1,36 @@
+EtherDFS changelog history
+
+v0.8.2 [2018-02-03]:
+ - support for lock/unlock operations (INT 2Fh,110Ah).
+
+v0.8.1 [2017-04-16]:
+ - EtherDFS frames are validated by a cksum (can be disabled with /n),
+ - EDF5 frames announce their length to avoid troubles with Ethernet padding,
+ - arguments can be passed in any order,
+ - /q and /u can be used together.
+
+v0.8 [2017-03-04]:
+ - improved self-detection to avoid loading EtherDFS twice,
+ - added unloading support (/u),
+ - fixed a FindFirst regression (fixes usage under 4DOS),
+ - fixed SETATTR action when using a non-FreeDOS attrib command,
+ - implemented the 'Seek From End' call,
+ - minor memory optimizations,
+ - makes sure the redirector API is available before installing,
+ - support for multiple drive mappings.
+
+v0.7 [2017-02-11]:
+ - MS-DOS compat: flagging newly mapped drive so MS-DOS doesn't ignore it,
+ - fixed FindNext behavior so it's compatible with ATTRIB from MS-DOS,
+ - implemented the "Special Open" call (used by COPY in MSDOS 5.0 and 6.x),
+ - increased timeout retries from 3 to 5 (more reliable on lossy networks),
+ - fixed parsing of the MAC address provided on command-line,
+ - minor speed optimizations.
+
+v0.6 [2017-02-05]:
+ - significantly reduced EtherDFS resident footprint (16K -> 7K),
+ - fixed GETATTR (was returning garbage),
+ - added support for 'CLOSE FILE', 'RENAME FILE' and 'SET ATTRIBS' actions.
+
+v0.5 [2017-01-31]:
+ - first public release.

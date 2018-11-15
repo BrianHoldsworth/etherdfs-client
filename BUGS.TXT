@@ -1,0 +1,43 @@
+EtherDFS -- known bugs
+
+Here I list the few things that I know are going south with EtherDFS.
+
+==============================================================================
+
+Displayed "total" and "available" disk space information is not correct.
+
+You may notice that EtherDFS shows "total" and "available" disk space
+information that is not exactly the same as what the drive on your server
+shows. This is expected, and it is due to two causes:
+
+1. EtherDFS limits the maximum disk space to slightly under 2 GiB, otherwise
+   most versions of MS-DOS would be confused.
+
+2. Even below 2 GiB, the amount of disk space won't always be exactly
+   reported, because the method of disk space computation is likely to be
+   different between DOS and your remote host's system. EtherDFS translates
+   one into another, but there still will be minor differences where EtherDFS
+   will show a few kilobytes less than expected.
+
+In both cases, the limitation is purely cosmetic and doesn't have any impact
+on the amount of data that can effectively be read from or written to the
+remote drive.
+
+==============================================================================
+
+Copied files loose their timestamps.
+
+When you copy a file to an EtherDFS drive, this file will loose its original
+timestamp and appear as being created "now". This is not really an EtherDFS
+bug, but rather a limitation of MS-DOS. I might work around this in some
+future versions.
+
+==============================================================================
+
+The game "Heretic" doesn't start from an EtherDFS drive with RTSPKT
+
+When the RTSPKT packet driver is used with a Realtek 8139 network card, the
+game "Heretic" is unable to start when launched from within an EtherDFS drive.
+Not sure whether this is due to a bug in EtherDFS, the RTSPKT driver or both.
+
+==============================================================================
